@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "mortgage"
+version = "0.1.0"
+description = ""
+authors = ["Joseph Sy Chu <Joe.SyChu@gmail.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"  # Broadened compatibility slightly from ^3.12, 3.10 is widely used and supports these libs
+numpy-financial = "^1.0.0" # For financial calculations like PMT
+jupyter = "^1.0.0"         # Core Jupyter environment
+notebook = "^7.0.0"        # For running .ipynb notebooks (Jupyter Notebook 7+)
+matplotlib = "^3.7.0"      # For plotting (optional, but used in the notebook starter)
+# pandas = "^2.0.0"        # Optional: For more advanced data manipulation if you expand
+seaborn = "^0.13.2"
+numpy = "^2.2.5"
+
+[tool.poetry.group.dev.dependencies] # Optional: for development tools
+# autopep8 = "^2.0.0" # Example: for code formatting
+# pytest = "^7.0.0"   # Example: for testing if you add tests
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
