@@ -79,16 +79,27 @@ def process_mc_results(cash_mc_results: list, mortgage_mc_results: list, holding
 
 # --- Analysis Functions ---
 
-def display_summary_stats(df_results: pd.DataFrame):
+def display_summary_stats(df_results: pd.DataFrame, config: dict = None):
     """
     Calculates and prints summary statistics for Net Gain and ROI from the processed DataFrame.
 
     Args:
         df_results (pd.DataFrame): DataFrame returned by process_mc_results.
+        config (dict, optional): Configuration dictionary used for the simulation.
     """
     if df_results.empty:
         print("Cannot display summary statistics: DataFrame is empty.")
         return
+
+    # Display remortgage configuration if available
+    if config:
+        holding_period = config.get('holding_period_years', 0)
+        fixed_term = config.get('fixed_term_length_years', 5)
+        num_remortgages = int(np.floor((holding_period - 1) / fixed_term))
+        print("\n--- Mortgage Configuration ---")
+        print(f"Fixed Term Length: {fixed_term} years")
+        print(f"Number of Remortgage Events: {num_remortgages}")
+        print(f"Initial Fixed Rate: {config.get('initial_mortgage_interest_rate_annual', 0)*100:.2f}%")
 
     print("\n--- Monte Carlo Results Summary ---")
     pd.options.display.float_format = '{:,.2f}'.format # Format pandas output
@@ -175,12 +186,16 @@ def plot_mc_distributions(df_results: pd.DataFrame, num_simulations: int, config
 
     # Add main title with key metadata
     if config:
+        # Calculate number of remortgage events
+        holding_period = config.get('holding_period_years', 0)
+        fixed_term = config.get('fixed_term_length_years', 5)
+        num_remortgages = int(np.floor((holding_period - 1) / fixed_term))
+        
         title = (f"Monte Carlo Analysis: £{config.get('property_value_initial', 0):,.0f} Property | "
-                f"{config.get('holding_period_years', 0)}yr Hold | "
+                f"{holding_period}yr Hold | "
                 f"{config.get('deposit_percentage', 0)*100:.0f}% Deposit | "
-                f"{config.get('initial_mortgage_interest_rate_annual', 0)*100:.1f}% Initial Rate")
-        if distribution_params and 'remort_rate_mean' in distribution_params:
-            title += f" | {distribution_params['remort_rate_mean']*100:.1f}% Expected Remortgage Rate"
+                f"{config.get('initial_mortgage_interest_rate_annual', 0)*100:.1f}% Initial Rate | "
+                f"{fixed_term}yr Fixed Terms")
         plt.suptitle(title, fontsize=12, y=0.95)
 
     # Net Gain Plot
@@ -208,9 +223,11 @@ def plot_mc_distributions(df_results: pd.DataFrame, num_simulations: int, config
     if config:
         config_text = "Base Configuration:\n"
         config_text += f"Property Value: £{config.get('property_value_initial', 0):,.0f}\n"
-        config_text += f"Holding Period: {config.get('holding_period_years', 0)} years\n"
+        config_text += f"Holding Period: {holding_period} years\n"
+        config_text += f"Fixed Term Length: {fixed_term} years\n"
+        config_text += f"Number of Remortgages: {num_remortgages}\n"
         config_text += f"Deposit: {config.get('deposit_percentage', 0)*100:.0f}%\n"
-        config_text += f"Initial Mortgage Rate: {config.get('initial_mortgage_interest_rate_annual', 0)*100:.2f}%\n"
+        config_text += f"Initial Rate: {config.get('initial_mortgage_interest_rate_annual', 0)*100:.2f}%\n"
         config_text += f"Mortgage Term: {config.get('mortgage_term_years', 0)} years"
         
         # Add text box with configuration
@@ -230,9 +247,9 @@ def plot_mc_distributions(df_results: pd.DataFrame, num_simulations: int, config
         # Service Charge Inflation
         if 'sc_inf_mean' in distribution_params and 'sc_inf_std_dev' in distribution_params:
             dist_text += f"Service Charge Infl.: {distribution_params['sc_inf_mean']*100:.1f}% ± {distribution_params['sc_inf_std_dev']*100:.1f}%\n"
-        # Remortgage Rate
+        # Future Fixed Rates
         if 'remort_rate_mean' in distribution_params and 'remort_rate_std_dev' in distribution_params:
-            dist_text += f"Remortgage Rate: {distribution_params['remort_rate_mean']*100:.1f}% ± {distribution_params['remort_rate_std_dev']*100:.1f}%"
+            dist_text += f"Future Fixed Rates: {distribution_params['remort_rate_mean']*100:.1f}% ± {distribution_params['remort_rate_std_dev']*100:.1f}%"
 
         # Add text box with distribution assumptions
         plt.figtext(0.35, 0.02, dist_text,
