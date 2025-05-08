@@ -176,5 +176,18 @@ def main():
     )
     results_2 = run_scenario(config_2, assumptions_2)
 
+    # Create a scenario configuration
+    config = create_scenario_config(
+        holding_period_years=15,
+        fixed_term_length_years=5,
+        initial_rate=0.0445
+    )
+
+    # Create rate assumptions
+    assumptions = create_rate_assumptions()  # Uses default values
+
+    # Run the scenario
+    results = run_scenario(config, assumptions)
+
 if __name__ == "__main__":
     main() 
