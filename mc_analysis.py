@@ -137,11 +137,26 @@ def display_summary_stats(df_results: pd.DataFrame, config: dict = None):
             print(stats_roi[['mean', 'std', 'min', '5%', '50%', '95%', 'max']].to_string())
     pd.reset_option('display.float_format') # Reset formatting
 
+def calculate_confidence_interval(data, confidence=0.95):
+    """
+    Calculate confidence interval for the mean of the data.
+    
+    Args:
+        data (np.array): Data to calculate CI for
+        confidence (float): Confidence level (default 0.95 for 95% CI)
+    
+    Returns:
+        tuple: (mean, lower bound, upper bound)
+    """
+    mean = np.mean(data)
+    se = stats.sem(data)
+    ci = stats.t.interval(confidence, len(data)-1, loc=mean, scale=se)
+    return mean, ci[0], ci[1]
 
 def display_probability_analysis(df_results: pd.DataFrame):
     """
     Performs statistical analysis comparing Mortgage vs Cash scenarios.
-    Uses paired t-tests to calculate p-values for the difference in performance.
+    Uses paired t-tests to calculate p-values and confidence intervals for the difference in performance.
     
     Args:
         df_results (pd.DataFrame): DataFrame returned by process_mc_results.
@@ -161,28 +176,52 @@ def display_probability_analysis(df_results: pd.DataFrame):
     net_gain_diff = df_results['Mortgage Net Gain'].values - df_results['Cash Net Gain'].values
     roi_diff = df_results['Mortgage ROI (%)'].values - df_results['Cash ROI (%)'].values
     
+    # Calculate confidence intervals for differences
+    ng_diff_mean, ng_diff_lower, ng_diff_upper = calculate_confidence_interval(net_gain_diff)
+    roi_diff_mean, roi_diff_lower, roi_diff_upper = calculate_confidence_interval(roi_diff)
+    
+    # Calculate confidence intervals for individual strategies
+    ng_mort_mean, ng_mort_lower, ng_mort_upper = calculate_confidence_interval(df_results['Mortgage Net Gain'].values)
+    ng_cash_mean, ng_cash_lower, ng_cash_upper = calculate_confidence_interval(df_results['Cash Net Gain'].values)
+    roi_mort_mean, roi_mort_lower, roi_mort_upper = calculate_confidence_interval(df_results['Mortgage ROI (%)'].values)
+    roi_cash_mean, roi_cash_lower, roi_cash_upper = calculate_confidence_interval(df_results['Cash ROI (%)'].values)
+    
     # Perform one-sided t-tests
     # H0: difference <= 0 (mortgage doesn't outperform cash)
     # H1: difference > 0 (mortgage outperforms cash)
     t_stat_ng, p_value_ng = stats.ttest_1samp(net_gain_diff, 0)
     t_stat_roi, p_value_roi = stats.ttest_1samp(roi_diff, 0)
     
-    # Convert to one-sided p-values (since we're testing if mortgage > cash)
+    # Convert to one-sided p-values
     p_value_ng = p_value_ng / 2 if t_stat_ng > 0 else 1 - p_value_ng / 2
     p_value_roi = p_value_roi / 2 if t_stat_roi > 0 else 1 - p_value_roi / 2
 
     print("\n--- Statistical Analysis ---")
     print("Net Gain Analysis:")
-    print(f"  Mean Difference (Mortgage - Cash): £{np.mean(net_gain_diff):,.0f}")
-    print(f"  Standard Deviation of Difference: £{np.std(net_gain_diff):,.0f}")
-    print(f"  t-statistic: {t_stat_ng:.2f}")
-    print(f"  p-value (one-sided): {p_value_ng:.2e}")
+    print("  Mortgage Strategy:")
+    print(f"    Mean: £{ng_mort_mean:,.0f}")
+    print(f"    95% CI: [£{ng_mort_lower:,.0f}, £{ng_mort_upper:,.0f}]")
+    print("  Cash Strategy:")
+    print(f"    Mean: £{ng_cash_mean:,.0f}")
+    print(f"    95% CI: [£{ng_cash_lower:,.0f}, £{ng_cash_upper:,.0f}]")
+    print("  Difference (Mortgage - Cash):")
+    print(f"    Mean: £{ng_diff_mean:,.0f}")
+    print(f"    95% CI: [£{ng_diff_lower:,.0f}, £{ng_diff_upper:,.0f}]")
+    print(f"    t-statistic: {t_stat_ng:.2f}")
+    print(f"    p-value (one-sided): {p_value_ng:.2e}")
     
     print("\nROI Analysis:")
-    print(f"  Mean Difference (Mortgage - Cash): {np.mean(roi_diff):.2f}%")
-    print(f"  Standard Deviation of Difference: {np.std(roi_diff):.2f}%")
-    print(f"  t-statistic: {t_stat_roi:.2f}")
-    print(f"  p-value (one-sided): {p_value_roi:.2e}")
+    print("  Mortgage Strategy:")
+    print(f"    Mean: {roi_mort_mean:.2f}%")
+    print(f"    95% CI: [{roi_mort_lower:.2f}%, {roi_mort_upper:.2f}%]")
+    print("  Cash Strategy:")
+    print(f"    Mean: {roi_cash_mean:.2f}%")
+    print(f"    95% CI: [{roi_cash_lower:.2f}%, {roi_cash_upper:.2f}%]")
+    print("  Difference (Mortgage - Cash):")
+    print(f"    Mean: {roi_diff_mean:.2f}%")
+    print(f"    95% CI: [{roi_diff_lower:.2f}%, {roi_diff_upper:.2f}%]")
+    print(f"    t-statistic: {t_stat_roi:.2f}")
+    print(f"    p-value (one-sided): {p_value_roi:.2e}")
     
     # Calculate proportion of simulations where mortgage outperforms
     prop_outperform_ng = np.mean(net_gain_diff > 0)
@@ -199,6 +238,24 @@ def display_probability_analysis(df_results: pd.DataFrame):
     print("\nEffect Size (Cohen's d):")
     print(f"  Net Gain: {cohens_d_ng:.2f}")
     print(f"  Annualized ROI: {cohens_d_roi:.2f}")
+
+    # Interpretation
+    print("\nInterpretation:")
+    if p_value_ng < 0.05 and ng_diff_lower > 0:
+        print("  Net Gain: Strong evidence that mortgage strategy outperforms cash")
+        print(f"  Expected outperformance: £{ng_diff_mean:,.0f} (95% CI: £{ng_diff_lower:,.0f} to £{ng_diff_upper:,.0f})")
+    elif p_value_ng < 0.05:
+        print("  Net Gain: Evidence of difference, but direction uncertain")
+    else:
+        print("  Net Gain: No strong evidence of difference between strategies")
+
+    if p_value_roi < 0.05 and roi_diff_lower > 0:
+        print("  ROI: Strong evidence that mortgage strategy outperforms cash")
+        print(f"  Expected outperformance: {roi_diff_mean:.2f}% (95% CI: {roi_diff_lower:.2f}% to {roi_diff_upper:.2f}%)")
+    elif p_value_roi < 0.05:
+        print("  ROI: Evidence of difference, but direction uncertain")
+    else:
+        print("  ROI: No strong evidence of difference between strategies")
 
 
 # --- Plotting Function ---
