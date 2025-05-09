@@ -18,8 +18,8 @@ _BASE_CONFIG = {
     "service_charge_inflation_rate": 0.03, # Mean assumption for MC
     "selling_costs_percentage": 0.02,
 
-    # --- Mortgage Specific (Updated for Iterative Remortgaging) ---
-    "deposit_percentage": 0.20,
+    # --- Mortgage Specific Assumptions ---
+    "deposit_percentage": 0.25,
     "initial_mortgage_interest_rate_annual": 0.045, # Initial fixed rate
     "mortgage_term_years": 25,                      # Original full term
     "fixed_term_length_years": 5,                   # Length of each fixed term
