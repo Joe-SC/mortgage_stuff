@@ -5,6 +5,9 @@ Provides functionality to run and analyze different property investment scenario
 
 import time
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 from mortgage_mc import get_base_config, run_monte_carlo_simulation
 from mc_analysis import process_mc_results, display_summary_stats, display_probability_analysis, plot_mc_distributions
 
@@ -122,13 +125,93 @@ def run_and_analyze_scenario(
     print(f"{'='*20} END SCENARIO: {scenario_name.upper()} {'='*20}\n")
     return df_processed
 
+def plot_scenario_comparison(scenarios_results: dict, figsize=(15, 10)):
+    """
+    Creates box plots comparing Net Gains and ROIs across scenarios.
 
-def compare_scenarios(scenarios_results: dict):
+    Args:
+        scenarios_results (dict): Dictionary mapping scenario names to their result DataFrames
+        figsize (tuple): Figure size (width, height) in inches
+    """
+    if not scenarios_results:
+        print("No scenarios to plot.")
+        return
+
+    # Prepare data for plotting
+    plot_data = []
+    for scenario_name, df in scenarios_results.items():
+        if df is not None and not df.empty:
+            # Add Net Gain data
+            for strategy in ['Cash', 'Mortgage']:
+                plot_data.extend([{
+                    'Scenario': scenario_name,
+                    'Strategy': strategy,
+                    'Metric': 'Net Gain (£)',
+                    'Value': value
+                } for value in df[f'{strategy} Net Gain']])
+                
+                # Add ROI data
+                plot_data.extend([{
+                    'Scenario': scenario_name,
+                    'Strategy': strategy,
+                    'Metric': 'ROI (%)',
+                    'Value': value
+                } for value in df[f'{strategy} ROI (%)']])
+
+    if not plot_data:
+        print("No valid data to plot.")
+        return
+
+    # Create DataFrame for plotting
+    df_plot = pd.DataFrame(plot_data)
+
+    # Set up the plot style
+    plt.style.use('seaborn-v0_8-darkgrid')
+    
+    # Create figure and subplots with adjusted height ratios and spacing
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.3)
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1])
+    
+    # Add main title with adjusted position
+    fig.suptitle('Scenario Comparison: Cash vs Mortgage', 
+                fontsize=14, 
+                y=0.98)  # Move title up
+
+    # Plot Net Gains
+    sns.boxplot(data=df_plot[df_plot['Metric'] == 'Net Gain (£)'],
+                x='Scenario', y='Value', hue='Strategy',
+                ax=ax1, palette=['skyblue', 'lightcoral'])
+    ax1.set_title('Distribution of Net Gains by Scenario', pad=20)  # Add padding below subplot title
+    ax1.set_ylabel('Net Gain (£)')
+    # Format y-axis ticks as currency
+    ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'£{x:,.0f}'))
+    ax1.tick_params(axis='x', rotation=45)
+
+    # Plot ROIs
+    sns.boxplot(data=df_plot[df_plot['Metric'] == 'ROI (%)'],
+                x='Scenario', y='Value', hue='Strategy',
+                ax=ax2, palette=['skyblue', 'lightcoral'])
+    ax2.set_title('Distribution of Annualized ROI by Scenario', pad=20)  # Add padding below subplot title
+    ax2.set_ylabel('Annualized ROI (%)')
+    ax2.tick_params(axis='x', rotation=45)
+
+    # Adjust layout to prevent overlapping
+    plt.tight_layout()
+    
+    # Adjust the layout again to make room for the suptitle
+    fig.subplots_adjust(top=0.93)
+    
+    plt.show()
+
+def compare_scenarios(scenarios_results: dict, show_plots: bool = True):
     """
     Compares results across multiple scenarios.
 
     Args:
         scenarios_results (dict): Dictionary mapping scenario names to their result DataFrames
+        show_plots (bool): Whether to display comparison plots
     """
     if not scenarios_results:
         print("No scenarios to compare.")
@@ -145,12 +228,22 @@ def compare_scenarios(scenarios_results: dict):
             mort_roi_mean = df['Mortgage ROI (%)'].mean()
             cash_roi_mean = df['Cash ROI (%)'].mean()
             
+            # Calculate 95% confidence intervals
+            mort_ci = df['Mortgage Net Gain'].std() * 1.96 / np.sqrt(len(df))
+            cash_ci = df['Cash Net Gain'].std() * 1.96 / np.sqrt(len(df))
+            mort_roi_ci = df['Mortgage ROI (%)'].std() * 1.96 / np.sqrt(len(df))
+            cash_roi_ci = df['Cash ROI (%)'].std() * 1.96 / np.sqrt(len(df))
+            
             comparison_data.append({
                 'Scenario': scenario_name,
                 'Mortgage Net Gain (Mean)': mort_mean,
+                'Mortgage Net Gain (95% CI)': mort_ci,
                 'Cash Net Gain (Mean)': cash_mean,
+                'Cash Net Gain (95% CI)': cash_ci,
                 'Mortgage ROI (Mean)': mort_roi_mean,
+                'Mortgage ROI (95% CI)': mort_roi_ci,
                 'Cash ROI (Mean)': cash_roi_mean,
+                'Cash ROI (95% CI)': cash_roi_ci,
                 'Net Gain Difference': mort_mean - cash_mean,
                 'ROI Difference': mort_roi_mean - cash_roi_mean
             })
@@ -164,5 +257,9 @@ def compare_scenarios(scenarios_results: dict):
         print("\nScenario Comparison Summary:")
         print(df_comparison)
         pd.reset_option('display.float_format')
+        
+        # Show box plots if requested
+        if show_plots:
+            plot_scenario_comparison(scenarios_results)
     else:
         print("No valid scenario data for comparison.") 
