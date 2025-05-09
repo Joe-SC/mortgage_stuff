@@ -15,6 +15,7 @@ matplotlib = "^3.7.0"      # For plotting (optional, but used in the notebook st
 # pandas = "^2.0.0"        # Optional: For more advanced data manipulation if you expand
 seaborn = "^0.13.2"
 numpy = "^2.2.5"
+scipy = "^1.15.3"
 
 [tool.poetry.group.dev.dependencies] # Optional: for development tools
 # autopep8 = "^2.0.0" # Example: for code formatting

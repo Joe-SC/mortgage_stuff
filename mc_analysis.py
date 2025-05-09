@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.ticker import FuncFormatter
+from scipy import stats
 
 # --- Helper Functions for Metric Calculation ---
 
@@ -139,28 +140,65 @@ def display_summary_stats(df_results: pd.DataFrame, config: dict = None):
 
 def display_probability_analysis(df_results: pd.DataFrame):
     """
-    Calculates and prints the probability of the Mortgage scenario outperforming the Cash scenario.
-
+    Performs statistical analysis comparing Mortgage vs Cash scenarios.
+    Uses paired t-tests to calculate p-values for the difference in performance.
+    
     Args:
         df_results (pd.DataFrame): DataFrame returned by process_mc_results.
     """
     if df_results.empty or not all(col in df_results.columns for col in ['Mortgage Net Gain', 'Cash Net Gain', 'Mortgage ROI (%)', 'Cash ROI (%)']):
-        print("\n--- Probability Analysis ---")
+        print("\n--- Statistical Analysis ---")
         print("    Not enough data or required columns missing for comparison.")
         return
 
     num_simulations = len(df_results)
     if num_simulations == 0:
-        print("\n--- Probability Analysis ---")
+        print("\n--- Statistical Analysis ---")
         print("    No simulations to analyze.")
         return
 
-    mortgage_outperforms_net_gain = np.sum(df_results['Mortgage Net Gain'] > df_results['Cash Net Gain']) / num_simulations
-    mortgage_outperforms_roi = np.sum(df_results['Mortgage ROI (%)'] > df_results['Cash ROI (%)']) / num_simulations
+    # Calculate differences (Mortgage - Cash)
+    net_gain_diff = df_results['Mortgage Net Gain'].values - df_results['Cash Net Gain'].values
+    roi_diff = df_results['Mortgage ROI (%)'].values - df_results['Cash ROI (%)'].values
+    
+    # Perform one-sided t-tests
+    # H0: difference <= 0 (mortgage doesn't outperform cash)
+    # H1: difference > 0 (mortgage outperforms cash)
+    t_stat_ng, p_value_ng = stats.ttest_1samp(net_gain_diff, 0)
+    t_stat_roi, p_value_roi = stats.ttest_1samp(roi_diff, 0)
+    
+    # Convert to one-sided p-values (since we're testing if mortgage > cash)
+    p_value_ng = p_value_ng / 2 if t_stat_ng > 0 else 1 - p_value_ng / 2
+    p_value_roi = p_value_roi / 2 if t_stat_roi > 0 else 1 - p_value_roi / 2
 
-    print("\n--- Probability Analysis ---")
-    print(f"Probability Mortgage outperforms Cash (Net Gain): {mortgage_outperforms_net_gain:.1%}")
-    print(f"Probability Mortgage outperforms Cash (Annualized ROI): {mortgage_outperforms_roi:.1%}")
+    print("\n--- Statistical Analysis ---")
+    print("Net Gain Analysis:")
+    print(f"  Mean Difference (Mortgage - Cash): £{np.mean(net_gain_diff):,.0f}")
+    print(f"  Standard Deviation of Difference: £{np.std(net_gain_diff):,.0f}")
+    print(f"  t-statistic: {t_stat_ng:.2f}")
+    print(f"  p-value (one-sided): {p_value_ng:.2e}")
+    
+    print("\nROI Analysis:")
+    print(f"  Mean Difference (Mortgage - Cash): {np.mean(roi_diff):.2f}%")
+    print(f"  Standard Deviation of Difference: {np.std(roi_diff):.2f}%")
+    print(f"  t-statistic: {t_stat_roi:.2f}")
+    print(f"  p-value (one-sided): {p_value_roi:.2e}")
+    
+    # Calculate proportion of simulations where mortgage outperforms
+    prop_outperform_ng = np.mean(net_gain_diff > 0)
+    prop_outperform_roi = np.mean(roi_diff > 0)
+    
+    print("\nProportion of Simulations where Mortgage Outperforms:")
+    print(f"  Net Gain: {prop_outperform_ng:.1%}")
+    print(f"  Annualized ROI: {prop_outperform_roi:.1%}")
+
+    # Effect size (Cohen's d)
+    cohens_d_ng = np.mean(net_gain_diff) / np.std(net_gain_diff)
+    cohens_d_roi = np.mean(roi_diff) / np.std(roi_diff)
+    
+    print("\nEffect Size (Cohen's d):")
+    print(f"  Net Gain: {cohens_d_ng:.2f}")
+    print(f"  Annualized ROI: {cohens_d_roi:.2f}")
 
 
 # --- Plotting Function ---
