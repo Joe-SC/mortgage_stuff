@@ -20,7 +20,7 @@ _BASE_CONFIG = {
 
     # --- Mortgage Specific Assumptions ---
     "deposit_percentage": 0.25,
-    "initial_mortgage_interest_rate_annual": 0.045, # Initial fixed rate
+    "initial_mortgage_interest_rate_annual": 0.041, # Initial fixed rate
     "mortgage_term_years": 25,                      # Original full term
     "fixed_term_length_years": 5,                   # Length of each fixed term
     "mortgage_arrangement_fee": 1500.0,             # Fee for initial mortgage
