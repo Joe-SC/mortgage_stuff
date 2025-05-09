@@ -125,7 +125,7 @@ def run_and_analyze_scenario(
     print(f"{'='*20} END SCENARIO: {scenario_name.upper()} {'='*20}\n")
     return df_processed
 
-def plot_scenario_comparison(scenarios_results: dict, figsize=(15, 10)):
+def plot_scenario_comparison(scenarios_results: dict, figsize=(12, 10)):
     """
     Creates box plots comparing Net Gains and ROIs across scenarios.
 
@@ -165,43 +165,64 @@ def plot_scenario_comparison(scenarios_results: dict, figsize=(15, 10)):
     # Create DataFrame for plotting
     df_plot = pd.DataFrame(plot_data)
 
-    # Set up the plot style
-    plt.style.use('seaborn-v0_8-darkgrid')
+    # Set style
+    plt.style.use('seaborn-v0_8-whitegrid') # Using whitegrid for a cleaner look
     
-    # Create figure and subplots with adjusted height ratios and spacing
+    # Create figure and axes with more height
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.3)
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.5) # Increased hspace
     ax1 = fig.add_subplot(gs[0])
     ax2 = fig.add_subplot(gs[1])
     
-    # Add main title with adjusted position
-    fig.suptitle('Scenario Comparison: Cash vs Mortgage', 
-                fontsize=14, 
-                y=0.98)  # Move title up
-
+    # Common style parameters
+    box_params = {
+        'palette': ['#87CEEB', '#F08080'],  # SkyBlue and LightCoral
+        'width': 0.6,
+        'fliersize': 2.5,
+        'linewidth': 1.2
+    }
+    
     # Plot Net Gains
     sns.boxplot(data=df_plot[df_plot['Metric'] == 'Net Gain (£)'],
                 x='Scenario', y='Value', hue='Strategy',
-                ax=ax1, palette=['skyblue', 'lightcoral'])
-    ax1.set_title('Distribution of Net Gains by Scenario', pad=20)  # Add padding below subplot title
-    ax1.set_ylabel('Net Gain (£)')
-    # Format y-axis ticks as currency
+                ax=ax1, **box_params)
+    
+    # Format Net Gains plot
+    ax1.set_title('Distribution of Net Gains by Scenario', fontsize=12, pad=15)
+    ax1.set_xlabel(None) # Remove x-axis label for top plot
+    ax1.set_ylabel('Net Gain (£)', fontsize=10, labelpad=10)
     ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'£{x:,.0f}'))
-    ax1.tick_params(axis='x', rotation=45)
-
+    ax1.tick_params(axis='y', labelsize=9)
+    ax1.tick_params(axis='x', labelsize=9, rotation=30)
+    
+    # Adjust legend for Net Gains
+    legend1 = ax1.legend(fontsize=9, bbox_to_anchor=(1.01, 1), loc='upper left', frameon=False)
+    legend1.set_title(None)
+    
     # Plot ROIs
     sns.boxplot(data=df_plot[df_plot['Metric'] == 'ROI (%)'],
                 x='Scenario', y='Value', hue='Strategy',
-                ax=ax2, palette=['skyblue', 'lightcoral'])
-    ax2.set_title('Distribution of Annualized ROI by Scenario', pad=20)  # Add padding below subplot title
-    ax2.set_ylabel('Annualized ROI (%)')
-    ax2.tick_params(axis='x', rotation=45)
-
-    # Adjust layout to prevent overlapping
-    plt.tight_layout()
+                ax=ax2, **box_params)
     
-    # Adjust the layout again to make room for the suptitle
-    fig.subplots_adjust(top=0.93)
+    # Format ROI plot
+    ax2.set_title('Distribution of Annualized ROI by Scenario', fontsize=12, pad=15)
+    ax2.set_xlabel('Scenario', fontsize=10, labelpad=10) # Add x-axis label for bottom plot
+    ax2.set_ylabel('Annualized ROI (%)', fontsize=10, labelpad=10)
+    ax2.tick_params(axis='y', labelsize=9)
+    ax2.tick_params(axis='x', labelsize=9, rotation=30)
+    
+    # Adjust legend for ROIs
+    legend2 = ax2.legend(fontsize=9, bbox_to_anchor=(1.01, 1), loc='upper left', frameon=False)
+    legend2.set_title(None)
+    
+    # Add main title
+    fig.suptitle('Scenario Comparison: Cash vs Mortgage', 
+                fontsize=14, 
+                fontweight='bold',
+                y=0.97) # Adjusted y position
+    
+    # Adjust layout to make room for legends and titles
+    plt.tight_layout(rect=[0, 0, 0.9, 0.95]) # Adjust rect to leave space for suptitle and legends
     
     plt.show()
 
