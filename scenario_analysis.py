@@ -33,8 +33,22 @@ def process_buy_vs_rent_mc_results(mc_results: list) -> pd.DataFrame:
     # Process results
     for res in mc_results:
         cash_flows = res['cash_flows']
+        
+        # Calculate net gain
         net_gain = cash_flows[-1] - cash_flows[0]
-        irr = npf.irr(cash_flows) * 100 if len(cash_flows) > 1 else 0
+        
+        # Calculate IRR with proper handling of cash flow timing
+        try:
+            # Convert cash flows to numpy array for better handling
+            cf_array = np.array(cash_flows)
+            # Calculate IRR only if we have valid cash flows
+            if len(cf_array) > 1 and np.any(cf_array > 0) and np.any(cf_array < 0):
+                irr = npf.irr(cf_array) * 100
+            else:
+                irr = 0
+        except Exception:
+            irr = 0
+            
         total_net_worth = res['total_net_worth']
         
         processed_results.append({
@@ -341,9 +355,9 @@ def display_summary_stats(df: pd.DataFrame):
     """
     # Group by scenario type and calculate statistics
     stats = df.groupby('scenario_type').agg({
-        'net_gain': ['mean', 'median', 'std'],
-        'irr': ['mean', 'median', 'std'],
-        'total_net_worth': ['mean', 'median', 'std']
+        'net_gain': ['mean', 'median', 'std', 'min', 'max'],
+        'irr': ['mean', 'median', 'std', 'min', 'max'],
+        'total_net_worth': ['mean', 'median', 'std', 'min', 'max']
     }).round(2)
     
     print("\nSummary Statistics:")
@@ -378,10 +392,15 @@ def display_probability_analysis(df: pd.DataFrame):
         irr_positive = (scenario_data['irr'] > 0).mean() * 100
         net_worth_positive = (scenario_data['total_net_worth'] > scenario_data['initial_investment']).mean() * 100
         
+        # Calculate additional metrics
+        net_gain_median = scenario_data['net_gain'].median()
+        irr_median = scenario_data['irr'].median()
+        net_worth_median = scenario_data['total_net_worth'].median()
+        
         print(f"\n{scenario}:")
-        print(f"  Net Gain > 0: {net_gain_positive:.1f}% of scenarios")
-        print(f"  IRR > 0: {irr_positive:.1f}% of scenarios")
-        print(f"  Net Worth > Initial Investment: {net_worth_positive:.1f}% of scenarios")
+        print(f"  Net Gain > 0: {net_gain_positive:.1f}% of scenarios (Median: £{net_gain_median:,.0f})")
+        print(f"  IRR > 0: {irr_positive:.1f}% of scenarios (Median: {irr_median:.1f}%)")
+        print(f"  Net Worth > Initial Investment: {net_worth_positive:.1f}% of scenarios (Median: £{net_worth_median:,.0f})")
 
 def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, dist_assumptions: dict):
     """
@@ -408,7 +427,17 @@ def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, 
     for metric, title, ax, fmt in metrics:
         for scenario in df['scenario_type'].unique():
             scenario_data = df[df['scenario_type'] == scenario][metric]
+            
+            # Plot histogram with KDE
             sns.histplot(scenario_data, label=scenario, alpha=0.5, ax=ax, kde=True)
+            
+            # Add vertical line for median
+            median_val = scenario_data.median()
+            ax.axvline(median_val, color='red', linestyle='--', alpha=0.5)
+            ax.text(median_val, ax.get_ylim()[1]*0.9, 
+                   f'Median: {fmt(median_val)}', 
+                   rotation=90, va='top')
+            
         ax.set_title(f'Distribution of {title}', fontsize=12, pad=15)
         ax.set_xlabel(title, fontsize=10)
         ax.set_ylabel('Frequency', fontsize=10)
@@ -419,13 +448,25 @@ def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, 
             ax.xaxis.set_major_formatter(mtick.PercentFormatter(decimals=1))
 
     fig.suptitle('Buy vs Rent Monte Carlo Simulation Results', fontsize=14, fontweight='bold', y=1.02)
+    
+    # Create detailed info text
     info_text = (
         f"Number of simulations: {num_simulations:,}\n"
         f"Property Value: £{config['property_value_initial']:,.0f}\n"
-        f"Holding Period: {config['holding_period_years']} years"
+        f"Holding Period: {config['holding_period_years']} years\n"
     )
     if 'initial_annual_rent' in config:
-        info_text += f"\nInitial Annual Rent: £{config['initial_annual_rent']:,.0f}"
+        info_text += f"Initial Annual Rent: £{config['initial_annual_rent']:,.0f}\n"
+    
+    # Add distribution assumptions
+    info_text += "\nDistribution Assumptions:\n"
+    for key, value in dist_assumptions.items():
+        if 'mean' in key:
+            param_name = key.replace('_mean', '').replace('_', ' ').title()
+            std_key = key.replace('mean', 'std_dev')
+            if std_key in dist_assumptions:
+                info_text += f"{param_name}: {value:.1%} ± {dist_assumptions[std_key]:.1%}\n"
+    
     plt.figtext(0.02, 0.02, info_text, fontsize=9, bbox=dict(facecolor='white', alpha=0.8))
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
@@ -438,13 +479,14 @@ def analyze_mc_results(df: pd.DataFrame, holding_period_years: int):
     summary_stats = df.groupby("scenario_type").agg({
         "net_gain": ["mean", "median", "std", "min", "max"],
         "irr": ["mean", "median", "std", "min", "max"],
-        "total_net_worth": ["mean", "median", "std", "min", "max"]  # Add total net worth stats
+        "total_net_worth": ["mean", "median", "std", "min", "max"]
     }).round(2)
     
     # Calculate probabilities using numpy broadcasting
     scenarios = df["scenario_type"].unique()
     n_scenarios = len(scenarios)
     probabilities = pd.DataFrame(index=scenarios, columns=scenarios)
+    
     for i, scenario1 in enumerate(scenarios):
         for j, scenario2 in enumerate(scenarios):
             if i != j:
@@ -462,5 +504,5 @@ def analyze_mc_results(df: pd.DataFrame, holding_period_years: int):
     print(probabilities.round(2))
     
     # Create and display plots
-    fig = plot_mc_distributions(df, holding_period_years)
+    plot_mc_distributions(df, len(df), {}, {})
     plt.show()

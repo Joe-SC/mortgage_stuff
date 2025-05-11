@@ -3,6 +3,7 @@
 import numpy as np
 import numpy_financial as npf
 import copy
+from scipy.stats import truncnorm
 
 # --- BASE CONFIGURATION (extended for buy vs. rent) ---
 _BASE_CONFIG_BUY_VS_RENT = {
@@ -56,8 +57,24 @@ def calculate_stamp_duty(price):
     elif price <= 1500000: return 2500.0 + 33750.0 + (price - 925000) * 0.10
     else: return 2500.0 + 33750.0 + 57500.0 + (price - 1500000) * 0.12
 
+def generate_truncated_normal(mean, std, lower, upper, size):
+    """Generate truncated normal distribution values."""
+    a = (lower - mean) / std
+    b = (upper - mean) / std
+    return truncnorm.rvs(a, b, loc=mean, scale=std, size=size)
+
+def validate_inputs(property_value, interest_rate, term_years):
+    """Validate input parameters."""
+    if property_value <= 0:
+        raise ValueError("Property value must be positive")
+    if interest_rate < 0:
+        raise ValueError("Interest rate cannot be negative")
+    if term_years <= 0:
+        raise ValueError("Term years must be positive")
+
 def calculate_mortgage_payment(principal, annual_rate, term_years):
     """Calculate monthly mortgage payment using the standard amortization formula."""
+    validate_inputs(principal, annual_rate, term_years)
     monthly_rate = annual_rate / 12
     num_payments = term_years * 12
     monthly_payment = -npf.pmt(monthly_rate, num_payments, principal)
@@ -65,6 +82,9 @@ def calculate_mortgage_payment(principal, annual_rate, term_years):
 
 def calculate_remaining_mortgage_balance(principal, annual_rate, term_years, years_elapsed):
     """Calculate remaining mortgage balance after a given number of years."""
+    validate_inputs(principal, annual_rate, term_years)
+    if years_elapsed < 0:
+        raise ValueError("Years elapsed cannot be negative")
     monthly_rate = annual_rate / 12
     num_payments = term_years * 12
     payments_made = years_elapsed * 12
@@ -85,21 +105,21 @@ def simulate_buy_scenario_annual_rates(
     selling_costs_percentage: float,
     property_appreciation_rates_annual: list,
     service_charge_inflation_rates_annual: list,
-    cash_available: float,  # New parameter: amount of cash available for investment
-    use_mortgage: bool = True,  # New parameter: whether to use mortgage
+    cash_available: float,
+    use_mortgage: bool = True,
     mortgage_interest_rate_annual: float = None,
     mortgage_term_years: int = None,
     loan_to_value_ratio: float = None,
     mortgage_fee: float = None,
     remortgage_fee: float = None,
     remortgage_interval_years: int = None,
-    mortgage_rates_annual: list = None,  # New parameter: array of mortgage rates for MC
+    mortgage_rates_annual: list = None,
     **kwargs
 ):
-    """
-    Simulate buying scenario with option for cash or mortgage purchase.
-    Returns both the property investment results and any alternative investment results.
-    """
+    """Simulate buying scenario with option for cash or mortgage purchase."""
+    # Validate inputs
+    validate_inputs(property_value_initial, mortgage_interest_rate_annual if use_mortgage else 0, holding_period_years)
+    
     stamp_duty = calculate_stamp_duty(property_value_initial)
     other_buying_costs = property_value_initial * buying_costs_percentage_other
     total_initial_buying_costs = stamp_duty + other_buying_costs
@@ -109,12 +129,21 @@ def simulate_buy_scenario_annual_rates(
         loan_amount = property_value_initial * loan_to_value_ratio
         initial_cash_outlay = (property_value_initial - loan_amount) + total_initial_buying_costs + mortgage_fee
         remaining_cash = cash_available - initial_cash_outlay
-        current_mortgage_rate = mortgage_rates_annual[0]  # Initialize to first year's rate
+        current_mortgage_rate = mortgage_rates_annual[0]
+        
+        # Calculate initial mortgage payment
+        initial_monthly_payment = calculate_mortgage_payment(
+            loan_amount,
+            current_mortgage_rate,
+            mortgage_term_years
+        )
+        annual_mortgage_payment = initial_monthly_payment * 12
     else:
         # Cash purchase
         initial_cash_outlay = property_value_initial + total_initial_buying_costs
         remaining_cash = cash_available - initial_cash_outlay
         loan_amount = 0
+        annual_mortgage_payment = 0
 
     # Initialize tracking variables
     current_property_value = property_value_initial
@@ -132,13 +161,22 @@ def simulate_buy_scenario_annual_rates(
         
         if use_mortgage:
             # Update mortgage rate if remortgaging year
-            if year % remortgage_interval_years == 0:
+            if year % remortgage_interval_years == 0 and year < holding_period_years:
                 current_mortgage_rate = mortgage_rates_annual[year-1]
-                if year < holding_period_years:  # Don't remortgage in final year
-                    total_ongoing_property_costs_paid += remortgage_fee
+                total_ongoing_property_costs_paid += remortgage_fee
+                
+                # Recalculate mortgage payment for new rate
+                remaining_term = mortgage_term_years - (year - 1)
+                initial_monthly_payment = calculate_mortgage_payment(
+                    current_mortgage_balance,
+                    current_mortgage_rate,
+                    remaining_term
+                )
+                annual_mortgage_payment = initial_monthly_payment * 12
 
         # Update property value
         current_property_value *= (1 + prop_app_rate)
+        
         # Calculate annual costs
         annual_property_related_costs = (
             current_service_charge +
@@ -147,39 +185,38 @@ def simulate_buy_scenario_annual_rates(
             maintenance_allowance_annual +
             insurance_annual_homeowner
         )
+        
         if use_mortgage:
-            # Calculate mortgage payment
-            annual_mortgage_payment = calculate_mortgage_payment(
-                current_mortgage_balance,
-                current_mortgage_rate,
-                mortgage_term_years - (year - 1)
-            ) * 12
+            # Calculate mortgage payment and update balance
             total_mortgage_payments += annual_mortgage_payment
-            current_mortgage_balance = calculate_remaining_mortgage_balance(
-                current_mortgage_balance,
-                current_mortgage_rate,
-                mortgage_term_years - (year - 1),
-                1
-            )
+            interest_this_year = current_mortgage_balance * current_mortgage_rate
+            principal_paid_this_year = annual_mortgage_payment - interest_this_year
+            current_mortgage_balance = max(0, current_mortgage_balance - principal_paid_this_year)
             annual_property_related_costs += annual_mortgage_payment
+
         total_ongoing_property_costs_paid += annual_property_related_costs
+        
         # Track cash flow for this year (negative outflow)
         year_costs = annual_property_related_costs
         if use_mortgage and (year % remortgage_interval_years == 0 and year < holding_period_years):
             year_costs += remortgage_fee
         cash_flows.append(-year_costs)
+        
         # Update inflating costs
         current_service_charge *= (1 + sc_inf_rate)
         current_council_tax *= (1 + sc_inf_rate)
+        
         # Grow alternative investments if any cash remaining
         if value_of_alternative_investments > 0:
             value_of_alternative_investments *= (1 + kwargs.get('alternative_investment_return_rate_annual', 0.05))
+
     # Calculate final property equity
     selling_costs = current_property_value * selling_costs_percentage
     net_sale_proceeds_from_property = current_property_value - selling_costs
     final_equity_in_property = net_sale_proceeds_from_property - current_mortgage_balance
-    # Add net proceeds from property sale to last year's cash flow (inflow)
-    cash_flows[-1] += net_sale_proceeds_from_property
+    
+    # Add net proceeds from property sale as separate cash flow entry
+    cash_flows.append(net_sale_proceeds_from_property)
     
     # Calculate total net worth at end
     total_net_worth = final_equity_in_property + value_of_alternative_investments
@@ -194,7 +231,7 @@ def simulate_buy_scenario_annual_rates(
         "value_of_alternative_investments_at_end": value_of_alternative_investments,
         "remaining_mortgage_balance": current_mortgage_balance if use_mortgage else 0,
         "cash_flows": cash_flows,
-        "total_net_worth": total_net_worth,  # Added total net worth
+        "total_net_worth": total_net_worth,
     }
 
 def simulate_renting_scenario_annual_rates(
@@ -255,9 +292,10 @@ def run_buy_vs_rent_mc_simulation(
     rent_inf_mean: float, rent_inf_std_dev: float,
     mortgage_rate_mean: float, mortgage_rate_std_dev: float,
     num_simulations: int = 10000,
-    cash_available: float = None,  # New parameter
-    use_mortgage: bool = True,  # New parameter
+    cash_available: float = None,
+    use_mortgage: bool = True,
 ):
+    """Run Monte Carlo simulation for buy vs rent comparison."""
     buy_results_list = []
     rent_results_list = []
     holding_period = base_config['holding_period_years']
@@ -272,19 +310,12 @@ def run_buy_vs_rent_mc_simulation(
     rng = np.random.default_rng()
 
     for _ in range(num_simulations):
-        # Generate annual rate sequences for this run
-        prop_app_rates = rng.normal(prop_app_mean, prop_app_std_dev, holding_period)
-        alt_inv_rates = rng.normal(alt_inv_mean, alt_inv_std_dev, holding_period)
-        sc_inf_rates = rng.normal(sc_inf_mean, sc_inf_std_dev, holding_period)
-        rent_inf_rates = rng.normal(rent_inf_mean, rent_inf_std_dev, holding_period)
-        mortgage_rates = rng.normal(mortgage_rate_mean, mortgage_rate_std_dev, holding_period)
-        
-        # Apply constraints
-        prop_app_rates = np.maximum(-0.99, prop_app_rates)
-        alt_inv_rates = np.maximum(-0.99, alt_inv_rates)
-        sc_inf_rates = np.maximum(-0.1, sc_inf_rates)
-        rent_inf_rates = np.maximum(-0.1, rent_inf_rates)
-        mortgage_rates = np.maximum(0.01, mortgage_rates)  # Minimum 1% mortgage rate
+        # Generate annual rate sequences using truncated normal distributions
+        prop_app_rates = generate_truncated_normal(prop_app_mean, prop_app_std_dev, -0.99, 0.99, holding_period)
+        alt_inv_rates = generate_truncated_normal(alt_inv_mean, alt_inv_std_dev, -0.99, 0.99, holding_period)
+        sc_inf_rates = generate_truncated_normal(sc_inf_mean, sc_inf_std_dev, -0.1, 0.2, holding_period)
+        rent_inf_rates = generate_truncated_normal(rent_inf_mean, rent_inf_std_dev, -0.1, 0.2, holding_period)
+        mortgage_rates = generate_truncated_normal(mortgage_rate_mean, mortgage_rate_std_dev, 0.01, 0.15, holding_period)
 
         # --- Run BUY Scenario ---
         sim_config_buy = copy.deepcopy(base_config)
