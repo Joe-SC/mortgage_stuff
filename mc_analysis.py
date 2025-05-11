@@ -356,18 +356,118 @@ def plot_mc_distributions(df_results: pd.DataFrame, num_simulations: int, config
     plt.show()
 
 
-# --- Optional: Add a simple test block if desired ---
-if __name__ == "__main__":
-    print("Testing mc_analysis functions...")
-    # Create dummy data similar to what run_monte_carlo_simulation returns
-    holding_p = 10
-    dummy_cash = [{'initial_cash_outlay': 600000, 'final_equity_in_property': 700000, 'value_of_alternative_investments_at_end': 0, 'total_ongoing_property_costs_paid': 100000, 'is_cash_purchase': True, 'total_mortgage_interest_paid': 0}] * 10
-    dummy_mort = [{'initial_cash_outlay': 150000, 'final_equity_in_property': 400000, 'value_of_alternative_investments_at_end': 700000, 'total_ongoing_property_costs_paid': 100000, 'is_cash_purchase': False, 'total_mortgage_interest_paid': 180000}] * 10
+def calculate_net_position_buy_cash(results_dict):
+    # Final net worth position for buying scenario
+    if not results_dict: return np.nan
+    return (results_dict.get('final_equity_in_property', 0) -
+            results_dict.get('total_ongoing_property_costs_paid', 0))
 
-    df_test = process_mc_results(dummy_cash, dummy_mort, holding_p)
-    print("\nTest DataFrame head:\n", df_test.head())
+def calculate_net_position_rent(results_dict):
+    # Final net worth position for renting scenario
+    if not results_dict: return np.nan
+    return (results_dict.get('value_of_alternative_investments_at_end', 0) -
+            results_dict.get('total_rent_paid', 0) -
+            results_dict.get('total_renter_ongoing_costs_paid', 0))
 
-    display_summary_stats(df_test)
-    display_probability_analysis(df_test)
-    # plot_mc_distributions(df_test, 10) # Plotting might pop up during script run
-    print("\nmc_analysis basic tests finished.")
+# ROI calculation is trickier for rent vs. buy with full cash.
+# The "initial outlay" is the full property price for buying.
+# For renting, the "initial outlay" towards housing is minimal (deposit).
+# The comparison often focuses on the difference in final net worth.
+# Or, ROI for renting can be seen as the ROI on the alternative investments made with the cash
+# that *would* have gone into the property.
+
+def process_buy_vs_rent_mc_results(buy_cash_mc_results: list, rent_mc_results: list, holding_period: int) -> pd.DataFrame:
+    if not buy_cash_mc_results or not rent_mc_results:
+        return pd.DataFrame()
+
+    buy_cash_net_positions = np.array([calculate_net_position_buy_cash(res) + res.get('initial_cash_outlay',0) for res in buy_cash_mc_results])
+    # Adding back initial_cash_outlay to represent final asset value relative to doing nothing with that cash.
+    # Or, more simply, just final_equity_in_property already accounts for initial outlay implicitly if we define "Net Gain" as
+    # (final_equity - ongoing_costs) - initial_cash_outlay.
+    # Let's define "Final Net Worth" for easier comparison:
+    # Buy_Cash: final_equity_in_property (as it's net of selling costs)
+    # Rent: value_of_alternative_investments_at_end - total_rent_paid - total_renter_ongoing_costs
+    # The "initial_cash_outlay" for buying scenario is the benchmark for what's invested in the Rent scenario.
+    
+    buy_final_net_worth = np.array([res.get('final_equity_in_property',0) for res in buy_cash_mc_results])
+    
+    rent_final_net_worth = np.array([
+        res.get('value_of_alternative_investments_at_end', 0) - res.get('total_rent_paid', 0) - res.get('total_renter_ongoing_costs_paid',0)
+        for res in rent_mc_results
+    ])
+    
+    # For ROI, let's consider the initial capital (property_price + buying_costs) as the base for both.
+    # Buy ROI: ((final_equity_in_property / initial_cash_outlay_buy_prop)**(1/hp)) - 1
+    # Rent ROI: ((value_of_alt_invest_end / cash_available_for_investment_rent)**(1/hp)) - 1 
+    #           (This needs adjustment for rent paid, as that's a cost against the alt. investment strategy)
+    # A simpler "Net Gain over doing nothing" might be:
+    # Buy Net Gain: final_equity_in_property - initial_cash_outlay_buy
+    # Rent Net Gain: (value_of_alt_inv_end - total_rent_paid - total_renter_ongoing_costs) - cash_available_for_investment_rent 
+    #                (This results in negative if rent > investment growth. The "cash_available_for_investment" is the opportunity cost)
+    # For this, let's use a "Net Financial Advantage" metric instead of direct ROI if it's confusing.
+    # Net Financial Advantage = Final Net Worth (Strategy) - Final Net Worth (Baseline of just investing the initial sum and paying rent from elsewhere or vice-versa)
+
+    # Sticking to Net Gain as "Final Assets - Initial Outlay - All Running Costs" is clearer for comparison.
+    # Initial Outlay (Buy): property_value_initial + total_initial_buying_costs
+    # Initial Outlay (Rent): initial_rental_deposit (cash invested in alternatives is the same base as buying)
+    
+    cash_net_gains = np.array([(res.get('final_equity_in_property',0) - res.get('initial_cash_outlay',0) - res.get('total_ongoing_property_costs_paid',0) ) for res in buy_cash_mc_results])
+    
+    # For rent, the "initial_cash_outlay" for the *strategy* is the rental deposit.
+    # The "cash_available_for_investment" is the opportunity.
+    # Net Gain (Rent) = value_of_alt_inv_end - initial_rental_deposit - total_rent_paid - total_renter_ongoing_costs
+    rent_net_gains = np.array([(res.get('value_of_alternative_investments_at_end',0) - res.get('initial_cash_outlay',0) - res.get('total_rent_paid',0) - res.get('total_renter_ongoing_costs_paid',0)) for res in rent_mc_results])
+
+    # For ROI, let's make it ROI on the "cash_if_buying" amount for both scenarios.
+    # Buy ROI: (Net Gain Buy / cash_if_buying)
+    # Rent ROI: (Net Gain Rent / cash_if_buying) -- This is also a bit forced.
+    # Better: Compare absolute Net Gains or Final Net Worth.
+    
+    # Let's use the ROI calculation similar to your mc_analysis.py
+    # but initial outlay for rent is the deposit. This highlights return on actual cash tied up.
+    
+    initial_outlay_buy = np.array([res.get('initial_cash_outlay', 0) for res in buy_cash_mc_results])
+    initial_outlay_rent = np.array([res.get('initial_cash_outlay', 0) for res in rent_mc_results]) # This is the deposit
+
+    cash_rois = []
+    for i, res_c in enumerate(buy_cash_mc_results):
+        ending_val = initial_outlay_buy[i] + cash_net_gains[i]
+        if initial_outlay_buy[i] > 0 and holding_period > 0:
+            roi_c = ((ending_val / initial_outlay_buy[i]) ** (1/holding_period)) - 1
+        else:
+            roi_c = np.nan
+        cash_rois.append(roi_c)
+
+    rent_rois = []
+    # For renting, the ROI should reflect the growth of the *entire sum of cash* that wasn't spent on the house,
+    # offset by rent. So, (Value of Alt Investments - Rent Paid) / Original Cash Pool.
+    # Or ROI on actual "tied up capital" (deposit) which is less meaningful for comparison.
+    # Let's re-frame ROI for renting: The "investment" is the large sum of cash NOT spent on the house.
+    # Net gain from this sum = (growth of sum) - (cost of renting).
+    
+    cash_if_buying_for_rent_roi = np.array([res.get('cash_available_for_investment', 0) for res in rent_mc_results]) #This needs to be passed into results
+    
+    for i, res_r in enumerate(rent_mc_results):
+        # Net gain considering the 'cash_if_buying' as the base that was alternatively invested
+        net_gain_rent_alt_inv = (res_r.get('value_of_alternative_investments_at_end',0) -
+                                 cash_if_buying_for_rent_roi[i] - # subtract the principal
+                                 res_r.get('total_rent_paid',0) - 
+                                 res_r.get('total_renter_ongoing_costs_paid',0))
+        
+        ending_val_rent = cash_if_buying_for_rent_roi[i] + net_gain_rent_alt_inv # This effectively becomes (value_of_alt_inv_end - total_rent - total_renter_costs)
+        
+        if cash_if_buying_for_rent_roi[i] > 0 and holding_period > 0:
+            roi_r = ((ending_val_rent / cash_if_buying_for_rent_roi[i]) ** (1/holding_period)) - 1
+        else:
+            roi_r = np.nan
+        rent_rois.append(roi_r)
+
+
+    df = pd.DataFrame({
+        'Buy (Cash) Net Gain': cash_net_gains,
+        'Rent Net Gain': rent_net_gains,
+        'Buy (Cash) ROI (%)': np.array(cash_rois) * 100,
+        'Rent ROI (%)': np.array(rent_rois) * 100 
+    })
+    df.dropna(inplace=True)
+    return df

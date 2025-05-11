@@ -10,7 +10,7 @@ _BASE_CONFIG = {
     "buying_costs_percentage_other": 0.015, # Legal, survey etc.
     "annual_property_appreciation_rate": 0.03, # Mean assumption for MC
     "holding_period_years": 10,
-    "service_charge_annual_initial": 6500.0,
+    "service_charge_annual_initial": 3500.0,
     "ground_rent_annual": 200.0,
     "council_tax_annual_initial": 2000.0,
     "maintenance_allowance_annual": 600.0,
