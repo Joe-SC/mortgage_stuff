@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import numpy_financial as npf
+from scipy.stats import ttest_ind
 from mortgage_mc import get_base_config, run_monte_carlo_simulation
 from mc_analysis import process_mc_results, display_summary_stats, display_probability_analysis, plot_mc_distributions
 from investment_options_mc import get_base_config_buy_vs_rent, run_buy_vs_rent_mc_simulation
@@ -179,16 +180,11 @@ def run_and_analyze_scenario(
 
 def compare_scenarios(scenarios_results: dict, show_plots: bool = True):
     """
-    Compares results across multiple scenarios (new long-format version).
-
-    Args:
-        scenarios_results (dict): Dictionary mapping scenario names to their result DataFrames
-        show_plots (bool): Whether to display comparison plots
+    Compares results across multiple scenarios (new long-format version), with CIs.
     """
     if not scenarios_results:
         print("No scenarios to compare.")
         return
-
     print("\n=== Scenario Comparison ===")
     summary_rows = []
     for scenario_name, df in scenarios_results.items():
@@ -200,10 +196,13 @@ def compare_scenarios(scenarios_results: dict, show_plots: bool = True):
                     'Strategy': scen_type,
                     'Net Gain Mean': subdf['net_gain'].mean(),
                     'Net Gain Std': subdf['net_gain'].std(),
+                    'Net Gain 95% CI': bootstrap_ci(subdf['net_gain'].values, np.mean),
                     'IRR Mean': subdf['irr'].mean(),
                     'IRR Std': subdf['irr'].std(),
+                    'IRR 95% CI': bootstrap_ci(subdf['irr'].values, np.mean),
                     'Total Net Worth Mean': subdf['total_net_worth'].mean(),
                     'Total Net Worth Std': subdf['total_net_worth'].std(),
+                    'Total Net Worth 95% CI': bootstrap_ci(subdf['total_net_worth'].values, np.mean),
                 })
     if summary_rows:
         summary_df = pd.DataFrame(summary_rows)
@@ -212,7 +211,6 @@ def compare_scenarios(scenarios_results: dict, show_plots: bool = True):
     else:
         print("No valid scenario data for comparison.")
         return
-
     # Optional: plot distributions for each scenario_type across all scenarios
     if show_plots:
         plt.style.use('seaborn-v0_8-whitegrid')
@@ -348,21 +346,24 @@ def run_and_analyze_buy_vs_rent_scenario(
 
 def display_summary_stats(df: pd.DataFrame):
     """
-    Display summary statistics for the simulation results.
-    
-    Args:
-        df (pd.DataFrame): DataFrame containing simulation results
+    Display summary statistics for the simulation results, including bootstrap CIs.
     """
-    # Group by scenario type and calculate statistics
     stats = df.groupby('scenario_type').agg({
         'net_gain': ['mean', 'median', 'std', 'min', 'max'],
         'irr': ['mean', 'median', 'std', 'min', 'max'],
         'total_net_worth': ['mean', 'median', 'std', 'min', 'max']
     }).round(2)
-    
     print("\nSummary Statistics:")
     print(stats)
-    
+    # Add bootstrap CIs for each metric
+    for scenario in df['scenario_type'].unique():
+        print(f"\nBootstrap 95% Confidence Intervals for {scenario}:")
+        for metric in ['net_gain', 'irr', 'total_net_worth']:
+            vals = df[df['scenario_type'] == scenario][metric].values
+            mean_ci = bootstrap_ci(vals, np.mean)
+            median_ci = bootstrap_ci(vals, np.median)
+            print(f"  {metric} mean:   {mean_ci[0]:,.2f} to {mean_ci[1]:,.2f}")
+            print(f"  {metric} median: {median_ci[0]:,.2f} to {median_ci[1]:,.2f}")
     # Calculate probabilities using numpy broadcasting
     scenarios = df['scenario_type'].unique()
     for i, scenario1 in enumerate(scenarios):
@@ -506,3 +507,25 @@ def analyze_mc_results(df: pd.DataFrame, holding_period_years: int):
     # Create and display plots
     plot_mc_distributions(df, len(df), {}, {})
     plt.show()
+
+# --- Statistical Helper Functions ---
+def bootstrap_ci(data, func=np.mean, n_bootstrap=1000, ci=95):
+    data = np.array(data)
+    bootstraps = [func(np.random.choice(data, size=len(data), replace=True)) for _ in range(n_bootstrap)]
+    lower = np.percentile(bootstraps, (100 - ci) / 2)
+    upper = np.percentile(bootstraps, 100 - (100 - ci) / 2)
+    return lower, upper
+
+def permutation_test(data1, data2, func=np.mean, n_permutations=10000):
+    data1 = np.array(data1)
+    data2 = np.array(data2)
+    observed_diff = func(data1) - func(data2)
+    combined = np.concatenate([data1, data2])
+    count = 0
+    for _ in range(n_permutations):
+        np.random.shuffle(combined)
+        new_diff = func(combined[:len(data1)]) - func(combined[len(data1):])
+        if abs(new_diff) >= abs(observed_diff):
+            count += 1
+    p_value = count / n_permutations
+    return p_value
