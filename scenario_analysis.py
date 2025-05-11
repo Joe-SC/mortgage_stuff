@@ -406,12 +406,8 @@ def display_probability_analysis(df: pd.DataFrame):
 def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, dist_assumptions: dict):
     """
     Plot distributions of Net Gains, IRRs, and Total Net Worth from Monte Carlo simulations.
-    
-    Args:
-        df (pd.DataFrame): DataFrame containing simulation results
-        num_simulations (int): Number of simulations run
-        config (dict): Configuration used for the simulation
-        dist_assumptions (dict): Distribution assumptions used
+    Annotate each plot with mean ± 95% CI, median ± 95% CI for each scenario/metric,
+    and add 'probability better' for total net worth if two strategies are present.
     """
     import matplotlib.ticker as mtick
     plt.style.use('seaborn-v0_8-whitegrid')
@@ -425,20 +421,35 @@ def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, 
         ('total_net_worth', 'Total Net Worth (£)', ax3, lambda x: f'£{x:,.0f}')
     ]
 
+    scenario_types = df['scenario_type'].unique()
+    scenario_colors = dict(zip(scenario_types, sns.color_palette(n_colors=len(scenario_types))))
+
     for metric, title, ax, fmt in metrics:
-        for scenario in df['scenario_type'].unique():
+        stats_texts = []
+        for scenario in scenario_types:
             scenario_data = df[df['scenario_type'] == scenario][metric]
-            
+            color = scenario_colors[scenario]
             # Plot histogram with KDE
-            sns.histplot(scenario_data, label=scenario, alpha=0.5, ax=ax, kde=True)
-            
+            sns.histplot(scenario_data, label=scenario, alpha=0.5, ax=ax, kde=True, color=color)
             # Add vertical line for median
             median_val = scenario_data.median()
-            ax.axvline(median_val, color='red', linestyle='--', alpha=0.5)
-            ax.text(median_val, ax.get_ylim()[1]*0.9, 
-                   f'Median: {fmt(median_val)}', 
-                   rotation=90, va='top')
-            
+            ax.axvline(median_val, color=color, linestyle='--', alpha=0.7)
+            # Bootstrap CIs
+            mean_ci = bootstrap_ci(scenario_data, np.mean)
+            median_ci = bootstrap_ci(scenario_data, np.median)
+            mean_val = scenario_data.mean()
+            # Annotate statistics
+            stats_text = (
+                f"{scenario}\n"
+                f"  Mean:   {fmt(mean_val)}\n"
+                f"    95% CI: {fmt(mean_ci[0])} to {fmt(mean_ci[1])}\n"
+                f"  Median: {fmt(median_val)}\n"
+                f"    95% CI: {fmt(median_ci[0])} to {fmt(median_ci[1])}"
+            )
+            stats_texts.append(stats_text)
+            # Place annotation near median line
+            ax.text(median_val, ax.get_ylim()[1]*0.95, f"{scenario}\nMedian: {fmt(median_val)}", color=color, rotation=90, va='top', ha='center', fontsize=9, alpha=0.7)
+        # Add all stats as a legend box
         ax.set_title(f'Distribution of {title}', fontsize=12, pad=15)
         ax.set_xlabel(title, fontsize=10)
         ax.set_ylabel('Frequency', fontsize=10)
@@ -447,9 +458,21 @@ def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, 
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'£{x:,.0f}'))
         else:
             ax.xaxis.set_major_formatter(mtick.PercentFormatter(decimals=1))
+        # Place stats box in upper left
+        ax.text(0.01, 0.99, '\n\n'.join(stats_texts), transform=ax.transAxes, fontsize=9, va='top', ha='left', bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
+
+    # For total net worth, add probability better if two strategies
+    if len(scenario_types) == 2:
+        scen1, scen2 = scenario_types
+        vals1 = df[df['scenario_type'] == scen1]['total_net_worth'].values
+        vals2 = df[df['scenario_type'] == scen2]['total_net_worth'].values
+        prob1 = (vals1[:, None] > vals2).mean() * 100
+        prob2 = 100 - prob1
+        prob_text = (f"Probability {scen1} better: {prob1:.1f}%\n"
+                     f"Probability {scen2} better: {prob2:.1f}%")
+        ax3.text(0.99, 0.99, prob_text, transform=ax3.transAxes, fontsize=11, va='top', ha='right', bbox=dict(facecolor='white', alpha=0.9, edgecolor='gray'))
 
     fig.suptitle('Buy vs Rent Monte Carlo Simulation Results', fontsize=14, fontweight='bold', y=1.02)
-    
     # Create detailed info text
     info_text = (
         f"Number of simulations: {num_simulations:,}\n"
@@ -458,7 +481,6 @@ def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, 
     )
     if 'initial_annual_rent' in config:
         info_text += f"Initial Annual Rent: £{config['initial_annual_rent']:,.0f}\n"
-    
     # Add distribution assumptions
     info_text += "\nDistribution Assumptions:\n"
     for key, value in dist_assumptions.items():
@@ -467,7 +489,6 @@ def plot_mc_distributions(df: pd.DataFrame, num_simulations: int, config: dict, 
             std_key = key.replace('mean', 'std_dev')
             if std_key in dist_assumptions:
                 info_text += f"{param_name}: {value:.1%} ± {dist_assumptions[std_key]:.1%}\n"
-    
     plt.figtext(0.02, 0.02, info_text, fontsize=9, bbox=dict(facecolor='white', alpha=0.8))
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
