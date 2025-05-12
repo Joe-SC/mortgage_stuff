@@ -1,5 +1,4 @@
-# investment_options_mc.py (can be a new file or an adapted mortgage_mc.py)
-
+"""buy vs rent calculations"""
 import numpy as np
 import numpy_financial as npf
 import copy
